@@ -12,7 +12,7 @@ from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-from langchain.schema import Document
+from langchain_core.documents import Document
 
 st.set_page_config(
     page_title="Resume RAG Bot",
