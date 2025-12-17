@@ -122,44 +122,34 @@ if st.session_state.vector_db:
             st.warning("Please enter a query")
         else:
             with st.spinner("Searching..."):
-                retriever = st.session_state.vector_db.as_retriever(
-                    search_type="similarity",
-                    search_kwargs={"k": 4}
-                )
-
-                # -------------------------
-                # Safe retrieval for all LangChain versions
-                # -------------------------
                 try:
-                    docs = retriever.get_relevant_documents(query)
-                except AttributeError:
-                    # fallback for older versions
-                    if hasattr(retriever, "get_relevant_texts"):
-                        texts = retriever.get_relevant_texts(query)
-                        docs = [Document(page_content=t) for t in texts]
+                    # -------------------------
+                    # 🔹 Direct FAISS search
+                    # -------------------------
+                    docs_and_scores = st.session_state.vector_db.similarity_search_with_score(query, k=4)
+
+                    if not docs_and_scores:
+                        st.warning("No relevant documents found.")
                     else:
-                        st.error("Retriever object does not support any known method")
-                        docs = []
+                        docs = [d for d, score in docs_and_scores]
+                        context_text = "\n\n".join([d.page_content for d in docs])
 
-                if not docs:
-                    st.warning("No relevant documents found.")
-                else:
-                    context_text = "\n\n".join([d.page_content for d in docs])
-                    prompt_text = f"""
-                    Use the following resume context to answer the question.
-                    If the answer is not found, say so clearly.
+                        prompt_text = f"""
+                        Use the following resume context to answer the question.
+                        If the answer is not found, say so clearly.
 
-                    Context:
-                    {context_text}
+                        Context:
+                        {context_text}
 
-                    Question:
-                    {query}
-                    """
-                    try:
+                        Question:
+                        {query}
+                        """
+
                         llm = DeepSeekLLM(deepseek_key)
                         answer = llm(prompt_text)
                         st.subheader("✅ Answer")
                         st.write(answer)
-                    except requests.HTTPError as e:
-                        st.error(f"DeepSeek API error: {e}")
-
+                except requests.HTTPError as e:
+                    st.error(f"DeepSeek API error: {e}")
+                except Exception as e:
+                    st.error(f"Error during retrieval or DeepSeek call: {e}")
