@@ -1,4 +1,4 @@
-# RAGstreamlit_DeepSeek.py
+# RAGstreamlit_DeepSeek_Fixed.py
 import os
 import tempfile
 from typing import List
@@ -122,34 +122,44 @@ if st.session_state.vector_db:
             st.warning("Please enter a query")
         else:
             with st.spinner("Searching..."):
-                # Retrieve top chunks
                 retriever = st.session_state.vector_db.as_retriever(
                     search_type="similarity",
                     search_kwargs={"k": 4}
                 )
+
+                # -------------------------
+                # Safe retrieval for all LangChain versions
+                # -------------------------
                 try:
                     docs = retriever.get_relevant_documents(query)
                 except AttributeError:
-                    docs = retriever(query) 
+                    # fallback for older versions
+                    if hasattr(retriever, "get_relevant_texts"):
+                        texts = retriever.get_relevant_texts(query)
+                        docs = [Document(page_content=t) for t in texts]
+                    else:
+                        st.error("Retriever object does not support any known method")
+                        docs = []
 
-                context_text = "\n\n".join([d.page_content for d in docs])
+                if not docs:
+                    st.warning("No relevant documents found.")
+                else:
+                    context_text = "\n\n".join([d.page_content for d in docs])
+                    prompt_text = f"""
+                    Use the following resume context to answer the question.
+                    If the answer is not found, say so clearly.
 
-                # Build prompt
-                prompt_text = f"""
-                Use the following resume context to answer the question.
-                If the answer is not found, say so clearly.
+                    Context:
+                    {context_text}
 
-                Context:
-                {context_text}
+                    Question:
+                    {query}
+                    """
+                    try:
+                        llm = DeepSeekLLM(deepseek_key)
+                        answer = llm(prompt_text)
+                        st.subheader("✅ Answer")
+                        st.write(answer)
+                    except requests.HTTPError as e:
+                        st.error(f"DeepSeek API error: {e}")
 
-                Question:
-                {query}
-                """
-
-                try:
-                    llm = DeepSeekLLM(deepseek_key)
-                    answer = llm(prompt_text)
-                    st.subheader("✅ Answer")
-                    st.write(answer)
-                except requests.HTTPError as e:
-                    st.error(f"DeepSeek API error: {e}")
