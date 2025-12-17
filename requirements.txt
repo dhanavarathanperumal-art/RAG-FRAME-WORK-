@@ -6,3 +6,5 @@ faiss-cpu
 pypdf
 tiktoken
 openai
+langchain-text-splitters
+
