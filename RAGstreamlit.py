@@ -1,10 +1,8 @@
-# RAGstreamlit_DeepSeek_Fixed.py
 import os
 import tempfile
 from typing import List
-
-import streamlit as st
 import requests
+import streamlit as st
 
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -12,38 +10,55 @@ from langchain_community.vectorstores import FAISS
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_core.documents import Document
 
+
+# =========================
+# CONFIG
+# =========================
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+
+OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+MODEL_NAME = "deepseek/deepseek-r1-0528:free"
+
+if not OPENROUTER_API_KEY:
+    raise RuntimeError("OPENROUTER_API_KEY not set in environment")
+
+
+# =========================
+# STREAMLIT SETUP
+# =========================
 st.set_page_config(
     page_title="Resume RAG Bot",
     page_icon="🤖",
     layout="wide"
 )
 
-# -------------------------
-# Sidebar / API key
-# -------------------------
-st.sidebar.header("🔑 DeepSeek API Key")
-deepseek_key = st.sidebar.text_input("Enter DeepSeek API key", type="password")
+st.title("📄 Resume RAG Chatbot")
+st.markdown(
+    "Upload bulk **PDF resumes** and ask questions like:\n\n"
+    "**Explain this resume** or **Who has Python experience?**"
+)
 
-# -------------------------
-# Helper: save uploaded file
-# -------------------------
+
+# =========================
+# HELPERS
+# =========================
 def save_uploaded_file(uploaded_file) -> str:
     tf = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
     tf.write(uploaded_file.getbuffer())
     tf.close()
     return tf.name
 
-# -------------------------
-# Build vectorstore
-# -------------------------
+
 def build_vectorstore_from_pdf_paths(pdf_paths: List[str]):
     all_docs: List[Document] = []
 
     for p in pdf_paths:
         loader = PyPDFLoader(p)
         docs = loader.load()
+
         for d in docs:
             d.metadata["source"] = os.path.basename(p)
+
         all_docs.extend(docs)
 
     if not all_docs:
@@ -60,38 +75,40 @@ def build_vectorstore_from_pdf_paths(pdf_paths: List[str]):
         model_name="sentence-transformers/all-MiniLM-L6-v2"
     )
 
-    vectorstore = FAISS.from_documents(chunks, embeddings)
-    return vectorstore
+    return FAISS.from_documents(chunks, embeddings)
 
-# -------------------------
-# DeepSeek LLM wrapper
-# -------------------------
-class DeepSeekLLM:
-    def __init__(self, api_key, model="deepseek-chat"):
-        self.api_key = api_key
-        self.model = model
-        self.url = "https://api.deepseek.com/v1/chat/completions"
 
-    def __call__(self, prompt: str) -> str:
-        headers = {"Authorization": f"Bearer {self.api_key}"}
-        payload = {
-            "model": self.model,
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0
-        }
-        response = requests.post(self.url, headers=headers, json=payload)
-        response.raise_for_status()
-        return response.json()["choices"][0]["message"]["content"]
+def call_openrouter(prompt: str) -> str:
+    headers = {
+        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "Content-Type": "application/json",
+        "HTTP-Referer": "http://localhost",
+        "X-Title": "Resume RAG Bot",
+    }
 
-# -------------------------
-# UI
-# -------------------------
-st.title("📄 Resume RAG Chatbot")
-st.markdown(
-    "Upload bulk **PDF resumes** and ask questions like "
-    "**Who has 5+ years of Python experience?**"
-)
+    payload = {
+        "model": MODEL_NAME,
+        "messages": [
+            {"role": "system", "content": "You are an expert resume analyst."},
+            {"role": "user", "content": prompt},
+        ],
+        "temperature": 0.2,
+    }
 
+    response = requests.post(
+        OPENROUTER_URL,
+        headers=headers,
+        json=payload,
+        timeout=60,
+    )
+
+    response.raise_for_status()
+    return response.json()["choices"][0]["message"]["content"]
+
+
+# =========================
+# FILE UPLOAD
+# =========================
 uploaded_files = st.file_uploader(
     "Upload PDF resumes",
     type=["pdf"],
@@ -101,7 +118,7 @@ uploaded_files = st.file_uploader(
 if "vector_db" not in st.session_state:
     st.session_state.vector_db = None
 
-# Index button
+
 if uploaded_files and st.button("Index uploaded resumes ✅"):
     with st.spinner("Indexing resumes..."):
         try:
@@ -111,45 +128,47 @@ if uploaded_files and st.button("Index uploaded resumes ✅"):
         except Exception as e:
             st.error(f"Indexing failed: {e}")
 
-# Search (RAG)
+
+# =========================
+# SEARCH / RAG
+# =========================
 if st.session_state.vector_db:
-    query = st.text_input("Ask a question about candidates")
+    query = st.text_input("Ask a question about the resumes")
 
     if st.button("Search 🔎"):
-        if not deepseek_key:
-            st.warning("Please enter your DeepSeek API key")
-        elif not query.strip():
-            st.warning("Please enter a query")
+        if not query.strip():
+            st.warning("Please enter a question")
         else:
-            with st.spinner("Searching..."):
+            with st.spinner("Analyzing resumes..."):
                 try:
-                    # -------------------------
-                    # 🔹 Direct FAISS search
-                    # -------------------------
-                    docs_and_scores = st.session_state.vector_db.similarity_search_with_score(query, k=4)
+                    docs_and_scores = (
+                        st.session_state.vector_db
+                        .similarity_search_with_score(query, k=4)
+                    )
 
                     if not docs_and_scores:
-                        st.warning("No relevant documents found.")
+                        st.warning("No relevant resumes found.")
                     else:
-                        docs = [d for d, score in docs_and_scores]
-                        context_text = "\n\n".join([d.page_content for d in docs])
+                        docs = [doc for doc, _ in docs_and_scores]
+                        context = "\n\n".join(d.page_content for d in docs)
 
-                        prompt_text = f"""
-                        Use the following resume context to answer the question.
-                        If the answer is not found, say so clearly.
+                        final_prompt = f"""
+Use the resume information below to answer the question.
+If the answer is not present, clearly say so.
 
-                        Context:
-                        {context_text}
+RESUME DATA:
+{context}
 
-                        Question:
-                        {query}
-                        """
+QUESTION:
+{query}
+"""
 
-                        llm = DeepSeekLLM(deepseek_key)
-                        answer = llm(prompt_text)
+                        answer = call_openrouter(final_prompt)
+
                         st.subheader("✅ Answer")
                         st.write(answer)
+
                 except requests.HTTPError as e:
-                    st.error(f"DeepSeek API error: {e}")
+                    st.error(f"OpenRouter API error: {e}")
                 except Exception as e:
-                    st.error(f"Error during retrieval or DeepSeek call: {e}")
+                    st.error(f"Unexpected error: {e}")
