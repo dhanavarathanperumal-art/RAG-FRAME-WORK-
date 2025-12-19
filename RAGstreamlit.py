@@ -14,7 +14,7 @@ from langchain_core.documents import Document
 # =========================
 # CONFIG
 # =========================
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+OPENROUTER_API_KEY = os.getenv("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")
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 MODEL_NAME = "deepseek/deepseek-r1-0528:free"
