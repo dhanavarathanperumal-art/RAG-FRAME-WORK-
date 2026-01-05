@@ -23,7 +23,6 @@ import hashlib
 import re
 
 import streamlit as st
-# Removed: from streamlit_ace import st_ace
 import plotly.express as px
 import plotly.graph_objects as go
 
@@ -980,4 +979,9 @@ class ResumeSearchApp:
             store_embeddings = st.checkbox("Store Embeddings", True)
             
             # Advanced options
-            with
+            with st.expander("🔧 Advanced Options"):
+                language = st.selectbox("Language", ["English", "Multilingual"])
+                quality_preset = st.selectbox("Quality Preset", ["Fast", "Balanced", "High Quality"])
+                
+                if quality_preset == "High Quality":
+                    st.info("High quality mode uses more memory and
